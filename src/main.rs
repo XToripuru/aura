@@ -170,16 +170,20 @@ impl Drop for Context {
 }
 
 fn run_exec_line(exec_line: &str) {
-    let cleaned = exec_line
-        .split_whitespace()
+    let Ok(cleaned) = shell_words::split(exec_line) else {
+        return;
+    };
+
+    let cleaned: Vec<_> = cleaned
+        .into_iter()
         .filter(|token| !token.starts_with('%'))
-        .collect::<Vec<_>>();
+        .collect();
 
     if cleaned.is_empty() {
         return;
     }
 
-    let command = cleaned[0];
+    let command = &cleaned[0];
     let args = &cleaned[1..];
 
     let mut cmd = Command::new(command);
@@ -202,12 +206,35 @@ fn run_exec_line(exec_line: &str) {
 }
 
 fn apps(paths: &[impl AsRef<Path>]) -> Vec<App> {
-    let mut apps = Vec::new();
+    let mut res = Vec::new();
 
     for path in paths {
-        if let Ok(entries) = fs::read_dir(path) {
+        let Ok(path) = shellexpand::full(path.as_ref().to_str().unwrap()) else {
+            continue;
+        };
+        if let Ok(entries) = fs::read_dir(path.to_string()) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                if path.is_dir() {
+                    let recursive_apps = apps(&[&path]);
+                    res.extend_from_slice(&recursive_apps);
+                }
+                if path.extension().map_or(false, |ext| ext == "exe") {
+                    let name = path
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .strip_suffix(".exe")
+                        .unwrap()
+                        .to_owned();
+                    let exec = format!("wine {path:?}");
+                    res.push(App {
+                        name: name.clone(),
+                        name_lower: name.to_ascii_lowercase(),
+                        exec,
+                    });
+                }
                 if path.extension().map_or(false, |ext| ext == "desktop") {
                     if let Ok(file) = fs::File::open(&path) {
                         let reader = BufReader::new(file);
@@ -230,7 +257,7 @@ fn apps(paths: &[impl AsRef<Path>]) -> Vec<App> {
                         }
 
                         if let (Some(name), Some(exec)) = (name, exec) {
-                            apps.push(App {
+                            res.push(App {
                                 name: name.clone(),
                                 name_lower: name.to_ascii_lowercase(),
                                 exec,
@@ -242,7 +269,7 @@ fn apps(paths: &[impl AsRef<Path>]) -> Vec<App> {
         }
     }
 
-    apps
+    res
 }
 
 #[derive(Debug, Clone)]
