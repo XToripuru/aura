@@ -19,6 +19,8 @@ mod config;
 fn main() -> std::io::Result<()> {
     let mut ctx = Context::new()?;
 
+    ctx.render()?;
+
     loop {
         match read()? {
             Event::Key(key) => {
